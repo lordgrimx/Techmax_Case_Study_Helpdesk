@@ -10,8 +10,9 @@ class UserStatus(str, enum.Enum):
 
 # Geriye uyumluluk için eski enum'u koruyoruz
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    TECHNICIAN = "teknisyen"
+    ADMIN = "ADMIN"
+    AGENT = "AGENT"
+    SUPERVISOR = "SUPERVISOR"
     USER = "kullanıcı"
 
 class User(BaseModel):
@@ -44,6 +45,7 @@ class User(BaseModel):
     assigned_tickets = relationship("Ticket", foreign_keys="Ticket.assigned_to_id", back_populates="assigned_to")
     escalated_tickets = relationship("Ticket", foreign_keys="Ticket.escalated_to_id", back_populates="escalated_to")
     updated_tickets = relationship("Ticket", foreign_keys="Ticket.last_updated_by_id", back_populates="last_updated_by")
+    ticket_comments = relationship("TicketComment", back_populates="user")
     
     def __repr__(self):
         return f"<User(email='{self.email}', full_name='{self.full_name}')>"
@@ -83,3 +85,7 @@ class User(BaseModel):
     @property
     def is_system_admin(self) -> bool:
         return self.role_name == "admin"
+    
+    # Ticket relationships (backref olarak tanımlandı - Bu satırlar opsiyonel)
+    # created_tickets, assigned_tickets, escalated_tickets, updated_tickets
+    # Bu relationship'ler Ticket modelinde tanımlandı

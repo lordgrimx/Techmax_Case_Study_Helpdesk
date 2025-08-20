@@ -1,15 +1,9 @@
 'use client';
 
-import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
-import { format } from 'date-fns';
-import { tr } from 'date-fns/locale';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { Modal } from './ui/modal';
-import TicketForm from './TicketForm';
-import { EyeIcon, ClockIcon, CheckCircleIcon, AlertCircleIcon, PlusIcon } from 'lucide-react';
+import { EyeIcon, ClockIcon, CheckCircleIcon, AlertCircleIcon, PlusIcon, MessageCircleIcon } from 'lucide-react';
 
 const statusColors = {
   'açık': 'bg-red-100 text-red-800',
@@ -34,42 +28,8 @@ const statusIcons = {
   'kapatıldı': CheckCircleIcon,
 };
 
-export default function TicketList() {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+export default function TicketList({ tickets, isLoading, onCreateTicket, error, currentUser, onAddComment }) {
   const router = useRouter();
-  
-  const { data: tickets, isLoading, error, refetch } = useQuery({
-    queryKey: ['tickets'],
-    queryFn: async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('Token bulunamadı');
-      }
-
-      const response = await fetch('http://localhost:8000/api/v1/tickets/', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          localStorage.removeItem('token');
-          router.push('/login');
-          throw new Error('Oturum süresi dolmuş');
-        }
-        throw new Error('Tickets yüklenemedi');
-      }
-
-      return response.json();
-    },
-  });
-
-  const handleTicketCreated = () => {
-    setIsModalOpen(false);
-    refetch(); // Ticket listesini yenile
-  };
 
   if (error) {
     return (
@@ -80,7 +40,7 @@ export default function TicketList() {
         <h3 className="text-lg font-semibold text-gray-900 mb-2">Bir hata oluştu</h3>
         <p className="text-gray-600 mb-4">{error.message}</p>
         <Button 
-          onClick={() => refetch()}
+          onClick={() => window.location.reload()}
           className="bg-blue-600 hover:bg-blue-700 text-white"
         >
           Tekrar Dene
@@ -124,7 +84,7 @@ export default function TicketList() {
         <h3 className="text-xl font-semibold text-gray-900 mb-2">Henüz ticket bulunmuyor</h3>
         <p className="text-gray-500 mb-6">İlk destek talebinizi oluşturmak için aşağıdaki butona tıklayın.</p>
         <Button 
-          onClick={() => setIsModalOpen(true)}
+          onClick={onCreateTicket}
           className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold px-6 py-3 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200"
         >
           <PlusIcon className="w-5 h-5 mr-2" />
@@ -174,29 +134,34 @@ export default function TicketList() {
                   <p className="font-medium text-gray-700">{ticket.created_by?.full_name}</p>
                   <p>{new Date(ticket.created_at).toLocaleDateString('tr-TR')}</p>
                 </div>
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 text-blue-700 hover:from-blue-100 hover:to-purple-100 hover:border-blue-300 transition-all duration-200"
-                  onClick={() => router.push(`/tickets/${ticket.id}`)}
-                >
-                  <EyeIcon className="w-4 h-4 mr-1" />
-                  Görüntüle
-                </Button>
+                <div className="flex gap-2">
+                  {/* Yorum butonu - sadece role_id 2,3,4 olanlar görebilir */}
+                  {currentUser && [2, 3, 4].includes(currentUser.role_id) && (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="bg-gradient-to-r from-green-50 to-blue-50 border-green-200 text-green-700 hover:bg-gradient-to-r hover:from-green-600 hover:to-blue-600 hover:text-white hover:border-green-600 transition-all duration-200 font-medium"
+                      onClick={() => onAddComment(ticket.id)}
+                    >
+                      <MessageCircleIcon className="w-4 h-4 mr-1" />
+                      Yorum
+                    </Button>
+                  )}
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200 text-blue-700 hover:bg-gradient-to-r hover:from-blue-600 hover:to-purple-600 hover:text-white hover:border-blue-600 transition-all duration-200 font-medium"
+                    onClick={() => router.push(`/tickets/${ticket.id}`)}
+                  >
+                    <EyeIcon className="w-4 h-4 mr-1" />
+                    Görüntüle
+                  </Button>
+                </div>
               </div>
             </div>
           );
         })}
       </div>
-
-      {/* Yeni Ticket Modal */}
-      <Modal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        title="Yeni Ticket Oluştur"
-      >
-        <TicketForm onSuccess={handleTicketCreated} />
-      </Modal>
     </>
   );
 }

@@ -88,6 +88,14 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Bu e-posta adresi zaten kullanılıyor"
         )
     
+    # Varsayılan rolü al (customer)
+    default_role = db.query(Role).filter(Role.name == RoleType.CUSTOMER).first()
+    if not default_role:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Varsayılan rol bulunamadı. Lütfen sistem yöneticisine başvurun."
+        )
+    
     # Yeni kullanıcı oluştur
     hashed_password = get_password_hash(user_data.password)
     
@@ -98,7 +106,9 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         hashed_password=hashed_password,
         phone=user_data.phone,
         department=user_data.department,
-        role=UserRole.USER,  # Varsayılan olarak normal kullanıcı
+        role_id=default_role.id,  # Yeni rol sistemi için role_id set et
+        role=UserRole.USER,  # Geriye uyumluluk için eski rol alanı
+        status=UserStatus.ACTIVE,  # Varsayılan durum
         is_active=True,
         is_admin=False
     )

@@ -3,8 +3,9 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Button } from './ui/button';
-import { TicketIcon, UserIcon, LogOutIcon, MenuIcon, XIcon } from 'lucide-react';
+import { TicketIcon, UserIcon, LogOutIcon, MenuIcon, XIcon, UsersIcon, SettingsIcon, BarChart3Icon } from 'lucide-react';
 
 export default function Layout({ children }) {
   const pathname = usePathname();
@@ -12,6 +13,32 @@ export default function Layout({ children }) {
   const [user, setUser] = useState(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  const fetchCurrentUser = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      throw new Error('No token found');
+    }
+
+    const response = await fetch('http://localhost:8000/api/v1/users/me', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch user');
+    }
+
+    return response.json();
+  };
+
+  const { data: currentUser } = useQuery({
+    queryKey: ['currentUser'],
+    queryFn: fetchCurrentUser,
+    retry: false,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -56,9 +83,52 @@ export default function Layout({ children }) {
     router.push('/profile');
   };
 
-  const navigation = [
-    { name: 'Tickets', href: '/tickets', icon: TicketIcon },
-  ];
+  // Role-based navigation
+  const getNavigationItems = () => {
+    const baseNav = [
+      { name: 'Tickets', href: '/tickets', icon: TicketIcon },
+    ];
+
+    // currentUser veya user'dan role bilgisini al
+    const userRoleId = currentUser?.role_id || user?.role_id;
+    const userRole = currentUser?.role_name || user?.role_name;
+
+    if (!userRoleId && !userRole) return baseNav;
+
+    // role_id 3 olanlar için Agent Users sayfası
+    if (userRoleId === 3) {
+      return [
+        ...baseNav,
+        { name: 'Agent Kullanıcıları', href: '/agent-users', icon: UsersIcon },
+      ];
+    }
+
+    // role_id 4 (Admin) olanlar için tüm yetkiler
+    if (userRoleId === 4 || userRole === 'admin') {
+      return [
+        ...baseNav,
+        { name: 'Kullanıcılar', href: '/users', icon: UsersIcon },
+        { name: 'Raporlar', href: '/reports', icon: BarChart3Icon },
+        { name: 'Ayarlar', href: '/settings', icon: SettingsIcon },
+      ];
+    }
+
+    // role_id 2 (Agent) olanlar için
+    if (userRoleId === 2 || userRole === 'agent') {
+      return baseNav; // Sadece tickets
+    }
+
+    if (userRole === 'supervisor') {
+      return [
+        ...baseNav,
+        { name: 'Raporlar', href: '/reports', icon: BarChart3Icon },
+      ];
+    }
+
+    return baseNav;
+  };
+
+  const navigation = getNavigationItems();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -108,9 +178,14 @@ export default function Layout({ children }) {
                 </div>
               ) : user ? (
                 <>
-                  <span className="hidden sm:block text-sm text-gray-600">
-                    Hoş geldin, {user.full_name}
-                  </span>
+                  <div className="hidden sm:flex items-center space-x-2 text-sm text-gray-600">
+                    <span>Hoş geldin, {user.full_name}</span>
+                    {(currentUser?.role_name || user?.role_name) && (
+                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium">
+                        {currentUser?.role_id === 4 ? 'ADMIN' : (currentUser?.role_name || user?.role_name)}
+                      </span>
+                    )}
+                  </div>
                   <Button 
                     variant="ghost" 
                     size="sm" 

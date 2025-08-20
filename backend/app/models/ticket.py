@@ -47,6 +47,7 @@ class Ticket(BaseModel):
     assigned_to = relationship("User", foreign_keys=[assigned_to_id], back_populates="assigned_tickets")
     escalated_to = relationship("User", foreign_keys=[escalated_to_id], back_populates="escalated_tickets")
     last_updated_by = relationship("User", foreign_keys=[last_updated_by_id], back_populates="updated_tickets")
+    comments = relationship("TicketComment", back_populates="ticket", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Ticket(title='{self.title}', status='{self.status}')>"

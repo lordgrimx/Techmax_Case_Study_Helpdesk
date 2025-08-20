@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PlusIcon, SearchIcon } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import CommentModal from '@/components/CommentModal';
 
 const fetchTickets = async (searchTerm = '') => {
   const token = localStorage.getItem('token');
@@ -34,6 +35,29 @@ const fetchTickets = async (searchTerm = '') => {
       throw new Error('Unauthorized');
     }
     throw new Error('Failed to fetch tickets');
+  }
+
+  return response.json();
+};
+
+const fetchCurrentUser = async () => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    throw new Error('No token found');
+  }
+
+  const response = await fetch('http://localhost:8000/api/v1/users/me', {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      throw new Error('Unauthorized');
+    }
+    throw new Error('Failed to fetch user');
   }
 
   return response.json();
@@ -69,6 +93,8 @@ export default function TicketsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
+  const [selectedTicketId, setSelectedTicketId] = useState(null);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -80,6 +106,13 @@ export default function TicketsPage() {
 
     return () => clearTimeout(timer);
   }, [searchTerm]);
+
+  // Fetch current user
+  const { data: currentUser } = useQuery({
+    queryKey: ['currentUser'],
+    queryFn: fetchCurrentUser,
+    retry: false,
+  });
 
   const { data: tickets, isLoading, error } = useQuery({
     queryKey: ['tickets', debouncedSearchTerm],
@@ -110,6 +143,16 @@ export default function TicketsPage() {
     mutation.mutate(data);
   };
 
+  const handleAddComment = (ticketId) => {
+    setSelectedTicketId(ticketId);
+    setIsCommentModalOpen(true);
+  };
+
+  const handleCloseCommentModal = () => {
+    setIsCommentModalOpen(false);
+    setSelectedTicketId(null);
+  };
+
   return (
     <Layout>
       <div className="space-y-8">
@@ -118,10 +161,13 @@ export default function TicketsPage() {
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6">
             <div>
               <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent mb-2">
-                Destek Talepleri
+                {currentUser?.role?.name === 'Customer' ? 'Destek Taleplerim' : 'Destek Talepleri'}
               </h1>
               <p className="text-gray-600 text-lg">
-                Tüm destek taleplerini buradan yönetebilirsiniz
+                {currentUser?.role?.name === 'Customer' 
+                  ? 'Oluşturduğunuz destek taleplerini buradan takip edebilirsiniz'
+                  : 'Tüm destek taleplerini buradan yönetebilirsiniz'
+                }
               </p>
             </div>
             <Button 
@@ -136,13 +182,13 @@ export default function TicketsPage() {
           {/* Search Section */}
           <div className="mt-8">
             <div className="relative max-w-md">
-              <SearchIcon className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-gray-700 z-10"/>
               <Input
                 type="text"
                 placeholder="Ticket ara..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-12 pr-4 py-3 bg-white/60 backdrop-blur-sm border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
+                className="pl-12 pr-4 py-3 bg-white/80 backdrop-blur-sm border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 placeholder:text-gray-700 text-gray-900"
               />
             </div>
           </div>
@@ -162,7 +208,14 @@ export default function TicketsPage() {
 
         {/* Tickets List */}
         <div className="bg-white/50 backdrop-blur-sm rounded-2xl shadow-lg border border-white/20 p-6">
-          <TicketList tickets={tickets} isLoading={isLoading} />
+          <TicketList 
+            tickets={tickets} 
+            isLoading={isLoading}
+            error={error}
+            currentUser={currentUser}
+            onCreateTicket={() => setIsModalOpen(true)}
+            onAddComment={handleAddComment}
+          />
         </div>
       </div>
 
@@ -200,6 +253,14 @@ export default function TicketsPage() {
           />
         </div>
       </Modal>
+
+      {/* Comment Modal */}
+      <CommentModal
+        isOpen={isCommentModalOpen}
+        onClose={handleCloseCommentModal}
+        ticketId={selectedTicketId}
+        currentUser={currentUser}
+      />
     </Layout>
   );
 }

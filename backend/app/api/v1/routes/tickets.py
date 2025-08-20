@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 from app.db.session import get_db
 from app.models.ticket import Ticket, TicketStatus, TicketPriority, TicketCategory
+from app.models.ticket_comment import TicketComment
 from app.models.user import User
 from app.core.security import (
     get_current_active_user,
@@ -34,6 +35,29 @@ class TicketUpdate(BaseModel):
 
 class TicketAssign(BaseModel):
     assigned_to_id: int
+
+class UserResponseSimple(BaseModel):
+    id: int
+    username: str
+    email: str
+    full_name: str
+    
+    class Config:
+        from_attributes = True
+
+class CommentCreate(BaseModel):
+    content: str
+    is_internal: bool = False
+
+class CommentResponse(BaseModel):
+    id: int
+    content: str
+    is_internal: bool
+    created_at: datetime
+    user: UserResponseSimple
+    
+    class Config:
+        from_attributes = True
 
 class UserResponseSimple(BaseModel):
     id: int
@@ -98,13 +122,7 @@ async def get_tickets(
     if current_user.is_customer:
         # Customer sadece kendi ticket'larını görebilir
         query = query.filter(Ticket.created_by_id == current_user.id)
-    elif current_user.is_agent:
-        # Agent kendi oluşturduğu ve atanan ticket'ları görebilir
-        query = query.filter(
-            (Ticket.created_by_id == current_user.id) |
-            (Ticket.assigned_to_id == current_user.id)
-        )
-    # Supervisor ve Admin tüm ticket'ları görebilir
+    # Agent, Supervisor ve Admin tüm ticket'ları görebilir
     
     # Filtreler
     if status:
@@ -348,3 +366,108 @@ async def delete_ticket(
     db.commit()
     
     return {"message": "Ticket başarıyla silindi"}
+
+# Ticket Comments Endpoints
+
+@router.get("/tickets/{ticket_id}/comments", response_model=List[CommentResponse])
+async def get_ticket_comments(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Ticket yorumlarını getir"""
+    # Ticket'ın var olup olmadığını ve erişim kontrolünü yap
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Erişim kontrolü
+    can_access = False
+    if current_user.is_supervisor or current_user.is_system_admin:
+        can_access = True
+    elif current_user.is_agent:
+        can_access = True  # Agent tüm ticket'ları görebilir
+    elif current_user.is_customer:
+        can_access = (ticket.created_by_id == current_user.id)
+    
+    if not can_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu ticket'ın yorumlarına erişim yetkiniz yok"
+        )
+    
+    # Yorumları getir
+    query = db.query(TicketComment).filter(TicketComment.ticket_id == ticket_id).options(
+        joinedload(TicketComment.user)
+    )
+    
+    # Customer'lar internal notları göremez
+    if current_user.is_customer:
+        query = query.filter(TicketComment.is_internal == False)
+    
+    comments = query.order_by(TicketComment.created_at.asc()).all()
+    return comments
+
+@router.post("/tickets/{ticket_id}/comments", response_model=CommentResponse)
+async def create_ticket_comment(
+    ticket_id: int,
+    comment_data: CommentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Ticket'a yorum ekle"""
+    # Ticket'ın var olup olmadığını kontrol et
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Erişim kontrolü
+    can_comment = False
+    if current_user.is_supervisor or current_user.is_system_admin:
+        can_comment = True
+    elif current_user.is_agent:
+        can_comment = True
+    elif current_user.is_customer:
+        can_comment = (ticket.created_by_id == current_user.id)
+    
+    if not can_comment:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu ticket'a yorum ekleme yetkiniz yok"
+        )
+    
+    # Customer'lar internal note ekleyemez
+    if current_user.is_customer and comment_data.is_internal:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Internal not ekleme yetkiniz yok"
+        )
+    
+    # Yorum oluştur
+    new_comment = TicketComment(
+        ticket_id=ticket_id,
+        user_id=current_user.id,
+        content=comment_data.content,
+        is_internal=comment_data.is_internal
+    )
+    
+    db.add(new_comment)
+    
+    # Ticket'ın son güncelleme bilgisini güncelle
+    ticket.last_updated_by_id = current_user.id
+    
+    db.commit()
+    db.refresh(new_comment)
+    
+    # Comment'ı user bilgisiyle birlikte yükle
+    comment_with_user = db.query(TicketComment).filter(
+        TicketComment.id == new_comment.id
+    ).options(joinedload(TicketComment.user)).first()
+    
+    return comment_with_user

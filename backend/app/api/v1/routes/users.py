@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -32,18 +33,30 @@ class UserUpdate(BaseModel):
     department: Optional[str] = None
     status: Optional[str] = None
 
+class UserRoleUpdate(BaseModel):
+    role_id: int
+
+class RoleResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
 class UserResponse(BaseModel):
     id: int
     username: str
     email: str
     full_name: str
+    role_id: Optional[int] = None
     role_name: Optional[str] = None
     permissions: List[str] = []
     department: Optional[str] = None
     status: Optional[str] = None
     is_active: bool
     phone: Optional[str] = None
-    created_at: str
+    created_at: datetime
 
     class Config:
         from_attributes = True
@@ -53,14 +66,60 @@ class UserListResponse(BaseModel):
     username: str
     email: str
     full_name: str
+    role_id: Optional[int] = None
     role_name: Optional[str] = None
     department: Optional[str] = None
     status: Optional[str] = None
     is_active: bool
-    created_at: str
+    phone: Optional[str] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True
+
+@router.get("/users/agents-customers", response_model=List[UserListResponse])
+async def get_agents_and_customers(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Role ID 3 olanlar için Agent ve Customer kullanıcıları görüntüleme"""
+    # Sadece role_id 3 olanlar erişebilir
+    if current_user.role_id != 3:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu sayfaya erişim yetkiniz yok"
+        )
+    
+    # Role ID 2 (agent) olan kullanıcıları getir
+    query = db.query(User).filter(User.role_id == 2)
+    
+    users = query.offset(skip).limit(limit).all()
+    
+    # Response için kullanıcı listesini hazırla
+    result = []
+    for user in users:
+        role = None
+        if user.role_id:
+            role = db.query(Role).filter(Role.id == user.role_id).first()
+        
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role_id": user.role_id,
+            "role_name": role.name if role else None,
+            "department": user.department,
+            "status": user.status.value if user.status else None,
+            "is_active": user.is_active,
+            "phone": user.phone,
+            "created_at": user.created_at
+        }
+        result.append(user_data)
+    
+    return result
 
 @router.get("/users/", response_model=List[UserListResponse])
 async def get_users(
@@ -91,14 +150,60 @@ async def get_users(
     
     if status_filter:
         query = query.filter(User.status == status_filter)
+
+    # ID'ye göre sırala
+    users = query.order_by(User.id).offset(skip).limit(limit).all()    # Response için kullanıcı listesini hazırla
+    result = []
+    for user in users:
+        role = None
+        if user.role_id:
+            role = db.query(Role).filter(Role.id == user.role_id).first()
+        
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "full_name": user.full_name,
+            "role_id": user.role_id,
+            "role_name": role.name if role else None,
+            "department": user.department,
+            "status": user.status.value if user.status else None,
+            "is_active": user.is_active,
+            "phone": user.phone,
+            "created_at": user.created_at
+        }
+        result.append(user_data)
     
-    users = query.offset(skip).limit(limit).all()
-    return users
+    return result
 
 @router.get("/users/me", response_model=UserResponse)
-async def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+async def get_current_user_info(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
     """Mevcut kullanıcının kendi bilgileri"""
-    return current_user
+    # Role bilgisini yükle
+    role = None
+    if current_user.role_id:
+        role = db.query(Role).filter(Role.id == current_user.role_id).first()
+    
+    # Response object'ini hazırla
+    response_data = {
+        "id": current_user.id,
+        "username": current_user.username,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "role_id": current_user.role_id,
+        "role_name": role.name if role else None,
+        "permissions": role.permission_list if role else [],
+        "department": current_user.department,
+        "status": current_user.status.value if current_user.status else None,
+        "is_active": current_user.is_active,
+        "phone": current_user.phone,
+        "created_at": current_user.created_at
+    }
+    
+    return response_data
 
 @router.put("/users/me", response_model=UserResponse)
 async def update_current_user(
@@ -278,3 +383,78 @@ async def delete_user(
     db.delete(user)
     db.commit()
     return {"message": "Kullanıcı başarıyla silindi"}
+
+@router.get("/roles", response_model=List[RoleResponse])
+async def get_roles(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Tüm rolleri getir - Sadece Admin"""
+    roles = db.query(Role).all()
+    return roles
+
+@router.put("/users/{user_id}/role", response_model=UserResponse)
+async def update_user_role(
+    user_id: int,
+    role_update: UserRoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    """Kullanıcının rolünü güncelle - Sadece Admin"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Kullanıcı bulunamadı"
+        )
+    
+    # Rol kontrolü
+    role = db.query(Role).filter(Role.id == role_update.role_id).first()
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Geçersiz rol ID"
+        )
+    
+    # Kendinin rolünü değiştirmeyi engelle
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Kendi rolünüzü değiştiremezsiniz"
+        )
+    
+    # Rolü güncelle ve senkronize et
+    user.role_id = role_update.role_id
+    user.is_admin = (role.name == "admin")
+    
+    # Eski role enum'unu da senkronize et
+    from app.models.user import UserRole
+    if role.name == "customer":
+        user.role = UserRole.USER
+    elif role.name == "agent":
+        user.role = UserRole.AGENT
+    elif role.name == "supervisor":
+        user.role = UserRole.SUPERVISOR
+    elif role.name == "admin":
+        user.role = UserRole.ADMIN
+    
+    db.commit()
+    db.refresh(user)
+    
+    # Response için role bilgisini hazırla
+    response_data = {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "full_name": user.full_name,
+        "role_id": user.role_id,
+        "role_name": role.name,
+        "permissions": role.permission_list if role else [],
+        "department": user.department,
+        "status": user.status.value if user.status else None,
+        "is_active": user.is_active,
+        "phone": user.phone,
+        "created_at": user.created_at
+    }
+    
+    return response_data

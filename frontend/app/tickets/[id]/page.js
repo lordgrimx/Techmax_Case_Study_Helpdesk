@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import Layout from '@/components/Layout';
+import TicketComments from '@/components/TicketComments';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,6 +22,25 @@ import {
   PauseCircleIcon,
   XCircleIcon
 } from 'lucide-react';
+
+const fetchCurrentUser = async () => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    throw new Error('No token found');
+  }
+
+  const response = await fetch('http://localhost:8000/api/v1/users/me', {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch user');
+  }
+
+  return response.json();
+};
 
 const fetchTicket = async (id) => {
   const token = localStorage.getItem('token');
@@ -107,6 +127,12 @@ export default function TicketDetailPage({ params }) {
     queryKey: ['ticket', ticketId],
     queryFn: () => fetchTicket(ticketId),
     enabled: !!ticketId,
+    retry: false,
+  });
+
+  const { data: currentUser } = useQuery({
+    queryKey: ['currentUser'],
+    queryFn: fetchCurrentUser,
     retry: false,
   });
 
@@ -244,6 +270,9 @@ export default function TicketDetailPage({ params }) {
                 </CardContent>
               </Card>
             )}
+
+            {/* Comments Section */}
+            <TicketComments ticketId={ticket.id} />
           </div>
 
           {/* Sidebar */}
@@ -333,69 +362,71 @@ export default function TicketDetailPage({ params }) {
             </Card>
 
             {/* Actions */}
-            <Card className="bg-white shadow-sm border-0 shadow-lg">
-              <CardHeader className="border-b border-gray-100">
-                <CardTitle className="text-lg">İşlemler</CardTitle>
-              </CardHeader>
-              <CardContent className="pt-6">
-                <div className="space-y-3">
-                  {ticket.status === 'açık' && (
-                    <Button 
-                      className="w-full bg-blue-600 hover:bg-blue-700" 
-                      onClick={() => statusMutation.mutate({ id: ticket.id, status: 'devam_ediyor' })}
-                      disabled={statusMutation.isPending}
-                    >
-                      <PlayCircleIcon className="w-4 h-4 mr-2" />
-                      İşleme Al
-                    </Button>
-                  )}
-                  
-                  {ticket.status === 'devam_ediyor' && (
-                    <>
+            {currentUser && ['Agent', 'Supervisor', 'Admin'].includes(currentUser.role?.name) && (
+              <Card className="bg-white shadow-sm border-0 shadow-lg">
+                <CardHeader className="border-b border-gray-100">
+                  <CardTitle className="text-lg">İşlemler</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="space-y-3">
+                    {ticket.status === 'açık' && (
                       <Button 
-                        className="w-full bg-green-600 hover:bg-green-700" 
-                        onClick={() => statusMutation.mutate({ id: ticket.id, status: 'çözüldü' })}
+                        className="w-full bg-blue-600 hover:bg-blue-700" 
+                        onClick={() => statusMutation.mutate({ id: ticket.id, status: 'devam_ediyor' })}
                         disabled={statusMutation.isPending}
                       >
-                        <CheckCircleIcon className="w-4 h-4 mr-2" />
-                        Çözüldü Olarak İşaretle
+                        <PlayCircleIcon className="w-4 h-4 mr-2" />
+                        İşleme Al
                       </Button>
+                    )}
+                    
+                    {ticket.status === 'devam_ediyor' && (
+                      <>
+                        <Button 
+                          className="w-full bg-green-600 hover:bg-green-700" 
+                          onClick={() => statusMutation.mutate({ id: ticket.id, status: 'çözüldü' })}
+                          disabled={statusMutation.isPending}
+                        >
+                          <CheckCircleIcon className="w-4 h-4 mr-2" />
+                          Çözüldü Olarak İşaretle
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          className="w-full border-yellow-300 text-yellow-700 hover:bg-yellow-50" 
+                          onClick={() => statusMutation.mutate({ id: ticket.id, status: 'beklemede' })}
+                          disabled={statusMutation.isPending}
+                        >
+                          <PauseCircleIcon className="w-4 h-4 mr-2" />
+                          Beklemeye Al
+                        </Button>
+                      </>
+                    )}
+                    
+                    {ticket.status === 'beklemede' && (
                       <Button 
-                        variant="outline" 
-                        className="w-full border-yellow-300 text-yellow-700 hover:bg-yellow-50" 
-                        onClick={() => statusMutation.mutate({ id: ticket.id, status: 'beklemede' })}
+                        className="w-full bg-blue-600 hover:bg-blue-700" 
+                        onClick={() => statusMutation.mutate({ id: ticket.id, status: 'devam_ediyor' })}
                         disabled={statusMutation.isPending}
                       >
-                        <PauseCircleIcon className="w-4 h-4 mr-2" />
-                        Beklemeye Al
+                        <PlayCircleIcon className="w-4 h-4 mr-2" />
+                        İşleme Devam Et
                       </Button>
-                    </>
-                  )}
-                  
-                  {ticket.status === 'beklemede' && (
-                    <Button 
-                      className="w-full bg-blue-600 hover:bg-blue-700" 
-                      onClick={() => statusMutation.mutate({ id: ticket.id, status: 'devam_ediyor' })}
-                      disabled={statusMutation.isPending}
-                    >
-                      <PlayCircleIcon className="w-4 h-4 mr-2" />
-                      İşleme Devam Et
-                    </Button>
-                  )}
-                  
-                  {ticket.status === 'çözüldü' && (
-                    <Button 
-                      className="w-full bg-gray-600 hover:bg-gray-700" 
-                      onClick={() => statusMutation.mutate({ id: ticket.id, status: 'kapatıldı' })}
-                      disabled={statusMutation.isPending}
-                    >
-                      <XCircleIcon className="w-4 h-4 mr-2" />
-                      Ticket&apos;ı Kapat
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                    )}
+                    
+                    {ticket.status === 'çözüldü' && ['Supervisor', 'Admin'].includes(currentUser.role?.name) && (
+                      <Button 
+                        className="w-full bg-gray-600 hover:bg-gray-700" 
+                        onClick={() => statusMutation.mutate({ id: ticket.id, status: 'kapatıldı' })}
+                        disabled={statusMutation.isPending}
+                      >
+                        <XCircleIcon className="w-4 h-4 mr-2" />
+                        Ticket&apos;ı Kapat
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
       </div>
