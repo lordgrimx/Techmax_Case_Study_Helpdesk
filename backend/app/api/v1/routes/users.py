@@ -1,7 +1,11 @@
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+import os
+import uuid
+from pathlib import Path
 from app.db.session import get_db
 from app.models.user import User, UserStatus
 from app.models.role import Role
@@ -57,6 +61,12 @@ class UserResponse(BaseModel):
     is_active: bool
     phone: Optional[str] = None
     created_at: datetime
+    
+    # Rol kontrol property'leri
+    is_customer: bool = False
+    is_agent: bool = False
+    is_supervisor: bool = False
+    is_system_admin: bool = False
 
     class Config:
         from_attributes = True
@@ -84,9 +94,9 @@ async def get_agents_and_customers(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
-    """Role ID 3 olanlar için Agent ve Customer kullanıcıları görüntüleme"""
-    # Sadece role_id 3 olanlar erişebilir
-    if current_user.role_id != 3:
+    """Supervisor ve Admin için Agent ve Customer kullanıcıları görüntüleme"""
+    # Sadece supervisor (role_id 3) ve admin (role_id 4) erişebilir
+    if current_user.role_id not in [3, 4]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bu sayfaya erişim yetkiniz yok"
@@ -200,7 +210,13 @@ async def get_current_user_info(
         "status": current_user.status.value if current_user.status else None,
         "is_active": current_user.is_active,
         "phone": current_user.phone,
-        "created_at": current_user.created_at
+        "created_at": current_user.created_at,
+        
+        # Rol kontrol property'leri
+        "is_customer": current_user.is_customer,
+        "is_agent": current_user.is_agent,
+        "is_supervisor": current_user.is_supervisor,
+        "is_system_admin": current_user.is_system_admin
     }
     
     return response_data
@@ -458,3 +474,51 @@ async def update_user_role(
     }
     
     return response_data
+
+@router.post("/users/upload-profile-image")
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Profil fotoğrafı yükle"""
+    # Dosya türü kontrolü
+    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sadece JPEG, PNG, GIF ve WebP formatları desteklenmektedir"
+        )
+    
+    # Dosya boyutu kontrolü (5MB)
+    file_size = 0
+    content = await file.read()
+    file_size = len(content)
+    
+    if file_size > 5 * 1024 * 1024:  # 5MB
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Dosya boyutu 5MB'dan küçük olmalıdır"
+        )
+    
+    # Upload klasörünü oluştur
+    upload_dir = Path("uploads/profile_images")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Unique filename oluştur
+    file_extension = file.filename.split(".")[-1] if "." in file.filename else "jpg"
+    unique_filename = f"{uuid.uuid4().hex}.{file_extension}"
+    file_path = upload_dir / unique_filename
+    
+    # Dosyayı kaydet
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+    
+    # URL oluştur
+    image_url = f"/uploads/profile_images/{unique_filename}"
+    
+    # Kullanıcının profil fotoğrafını güncelle
+    current_user.profile_image = image_url
+    db.commit()
+    
+    return {"image_url": image_url, "message": "Profil fotoğrafı başarıyla yüklendi"}

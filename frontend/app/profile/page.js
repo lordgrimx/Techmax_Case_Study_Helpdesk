@@ -20,14 +20,21 @@ import {
   CalendarIcon,
   BadgeCheckIcon,
   KeyIcon,
-  HistoryIcon
+  HistoryIcon,
+  PlusIcon,
+  XIcon
 } from 'lucide-react';
+import { Modal } from '@/components/ui/modal';
 
 export default function ProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [showBackgroundModal, setShowBackgroundModal] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [backgroundGradient, setBackgroundGradient] = useState('from-blue-600 via-purple-600 to-indigo-600');
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -89,6 +96,7 @@ export default function ProfilePage() {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
+      setSelectedImage(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setFormData(prev => ({
@@ -99,6 +107,46 @@ export default function ProfilePage() {
       reader.readAsDataURL(file);
     }
   };
+
+  const handleImageUpload = async (file) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:8000/api/v1/users/upload-profile-image', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const fullImageUrl = `http://localhost:8000${result.image_url}`;
+        setFormData(prev => ({ ...prev, profile_image: fullImageUrl }));
+        setUser(prev => ({ ...prev, profile_image: fullImageUrl }));
+        setShowImageModal(false);
+        setSelectedImage(null);
+      }
+    } catch (error) {
+      console.error('Image upload error:', error);
+    }
+  };
+
+  const backgroundGradients = [
+    'from-blue-600 via-purple-600 to-indigo-600',
+    'from-pink-500 via-red-500 to-yellow-500',
+    'from-green-400 via-blue-500 to-purple-600',
+    'from-yellow-400 via-red-500 to-pink-500',
+    'from-indigo-500 via-purple-500 to-pink-500',
+    'from-cyan-500 via-blue-500 to-indigo-600',
+    'from-teal-400 via-blue-500 to-indigo-600',
+    'from-orange-400 via-red-500 to-pink-600',
+    'from-emerald-400 via-cyan-500 to-blue-600',
+    'from-violet-500 via-purple-500 to-blue-600'
+  ];
 
   const getInitials = (name) => {
     return name
@@ -183,9 +231,18 @@ export default function ProfilePage() {
         {/* Header Section */}
         <div className="relative">
           {/* Background Gradient */}
-          <div className="h-48 bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 rounded-2xl relative overflow-hidden">
+          <div className={`h-48 bg-gradient-to-r ${backgroundGradient} rounded-2xl relative overflow-hidden`}>
             <div className="absolute inset-0 bg-black/10"></div>
             <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent"></div>
+            
+            {/* Background Change Button */}
+            <button
+              onClick={() => setShowBackgroundModal(true)}
+              className="absolute top-4 left-4 w-8 h-8 bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-full flex items-center justify-center text-white shadow-lg transition-colors"
+            >
+              <PlusIcon className="w-4 h-4" />
+            </button>
+            
             {/* Decorative Elements */}
             <div className="absolute top-4 right-4">
               <div className="w-20 h-20 bg-white/10 rounded-full blur-xl"></div>
@@ -196,7 +253,7 @@ export default function ProfilePage() {
           </div>
 
           {/* Profile Info Overlay */}
-          <div className="absolute -bottom-16 left-8 flex items-end space-x-6">
+          <div className="absolute -bottom-13 left-8 flex items-end space-x-6">
             {/* Profile Picture */}
             <div className="relative group">
               <div className="w-32 h-32 rounded-2xl bg-white shadow-xl border-4 border-white overflow-hidden">
@@ -217,29 +274,24 @@ export default function ProfilePage() {
                 )}
               </div>
               
-              {/* Camera Icon for Upload */}
-              {isEditing && (
-                <label className="absolute inset-0 flex items-center justify-center bg-black/50 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                  <CameraIcon className="w-8 h-8 text-white" />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                  />
-                </label>
-              )}
+              {/* Plus Icon for Image Upload */}
+              <button
+                onClick={() => setShowImageModal(true)}
+                className="absolute -top-2 -right-2 w-8 h-8 bg-blue-600 hover:bg-blue-700 rounded-full flex items-center justify-center text-white shadow-lg transition-colors"
+              >
+                <PlusIcon className="w-4 h-4" />
+              </button>
             </div>
 
             {/* User Info */}
             <div className="pb-4">
-              <h1 className="text-3xl font-bold text-white mb-2">{user.full_name}</h1>
+              <h1 className="text-3xl font-bold text-white mb-2 drop-shadow-lg">{user.full_name}</h1>
               <div className="flex items-center space-x-4">
-                <span className={`px-3 py-1 rounded-full text-sm font-medium border ${getRoleColor(user.role_name || user.role)}`}>
+                <span className={`px-3 py-1 rounded-full text-sm font-medium border bg-white/90 backdrop-blur-sm ${getRoleColor(user.role_name || user.role)}`}>
                   <BadgeCheckIcon className="w-4 h-4 inline mr-1" />
                   {user.role_name || user.role}
                 </span>
-                <span className="text-blue-100 text-sm">@{user.username}</span>
+                <span className="text-white text-sm drop-shadow-lg bg-black/20 px-2 py-1 rounded backdrop-blur-sm">@{user.username}</span>
               </div>
             </div>
           </div>
@@ -491,6 +543,78 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      {/* Profile Image Modal */}
+      <Modal isOpen={showImageModal} onClose={() => setShowImageModal(false)} title="Profil Fotoğrafını Güncelle">
+        <div className="space-y-4">
+          <div className="text-center">
+            <div className="w-32 h-32 mx-auto rounded-xl overflow-hidden bg-gray-100 mb-4">
+              {selectedImage ? (
+                <Image 
+                  src={URL.createObjectURL(selectedImage)} 
+                  alt="Preview" 
+                  width={128}
+                  height={128}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
+                  <CameraIcon className="w-8 h-8 text-white" />
+                </div>
+              )}
+            </div>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="hidden"
+              id="profile-image-input"
+            />
+            <label
+              htmlFor="profile-image-input"
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 cursor-pointer"
+            >
+              <CameraIcon className="w-4 h-4 mr-2" />
+              Fotoğraf Seç
+            </label>
+          </div>
+          <div className="flex justify-end space-x-2">
+            <Button variant="outline" onClick={() => {
+              setShowImageModal(false);
+              setSelectedImage(null);
+            }}>
+              İptal
+            </Button>
+            <Button
+              onClick={() => selectedImage && handleImageUpload(selectedImage)}
+              disabled={!selectedImage}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Güncelle
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Background Modal */}
+      <Modal isOpen={showBackgroundModal} onClose={() => setShowBackgroundModal(false)} title="Arka Plan Temasını Değiştir">
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            {backgroundGradients.map((gradient, index) => (
+              <div
+                key={index}
+                onClick={() => {
+                  setBackgroundGradient(gradient);
+                  setShowBackgroundModal(false);
+                }}
+                className={`h-20 bg-gradient-to-r ${gradient} rounded-lg cursor-pointer border-2 ${
+                  backgroundGradient === gradient ? 'border-white shadow-lg' : 'border-transparent'
+                } hover:scale-105 transition-transform`}
+              />
+            ))}
+          </div>
+        </div>
+      </Modal>
     </Layout>
   );
 }

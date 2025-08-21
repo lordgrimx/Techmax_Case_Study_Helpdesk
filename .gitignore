@@ -56,6 +56,7 @@ backend/alembic.ini.bak
 backend/test_*.py
 backend/*.db
 backend/*.sqlite
+uploads/
 
 # Logs
 *.log

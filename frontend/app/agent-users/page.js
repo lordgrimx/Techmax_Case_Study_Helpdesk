@@ -90,8 +90,8 @@ export default function AgentUsersPage() {
     }
   }, [userError, error, router]);
 
-  // Erişim kontrolü - sadece role_id 3 olanlar erişebilir
-  if (currentUser && ![3].includes(currentUser.role_id)) {
+  // Erişim kontrolü - sadece role_id 3 (supervisor) ve 4 (admin) olanlar erişebilir
+  if (currentUser && ![3, 4].includes(currentUser.role_id)) {
     return (
       <Layout>
         <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">

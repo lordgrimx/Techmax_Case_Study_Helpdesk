@@ -1,6 +1,9 @@
 from typing import List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import os
+import base64
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 from app.db.session import get_db
 from app.models.ticket import Ticket, TicketStatus, TicketPriority, TicketCategory
@@ -35,6 +38,26 @@ class TicketUpdate(BaseModel):
 
 class TicketAssign(BaseModel):
     assigned_to_id: int
+
+class TicketEscalate(BaseModel):
+    escalated_to_id: int
+    escalation_reason: str
+    escalation_reason: str = Field(..., min_length=10, description="Yükseltme nedeni")
+
+class TicketResolve(BaseModel):
+    resolution: str = Field(..., min_length=10, description="Çözüm açıklaması")
+    status: TicketStatus = Field(default=TicketStatus.RESOLVED, description="Ticket durumu")
+
+class TicketClose(BaseModel):
+    closing_note: Optional[str] = Field(None, description="Kapatma notu")
+
+class FileUpload(BaseModel):
+    filename: str
+    file_data: str  # Base64 encoded
+    content_type: str
+
+class AttachmentAdd(BaseModel):
+    attachments: List[FileUpload]
 
 class UserResponseSimple(BaseModel):
     id: int
@@ -471,3 +494,339 @@ async def create_ticket_comment(
     ).options(joinedload(TicketComment.user)).first()
     
     return comment_with_user
+
+
+# ============= YENİ ÖZELLİKLER =============
+
+@router.put("/tickets/{ticket_id}/escalate", response_model=TicketResponse)
+async def escalate_ticket(
+    ticket_id: int,
+    escalate_data: TicketEscalate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent_or_above)
+):
+    """Ticket'ı üst seviyeye yükselt - Agent ve üstü"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Yükseltilecek kullanıcıyı kontrol et
+    escalated_user = db.query(User).filter(User.id == escalate_data.escalated_to_id).first()
+    if not escalated_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Yükseltilecek kullanıcı bulunamadı"
+        )
+    
+    # Yükseltme yetkisi kontrolü
+    if current_user.is_agent and not (escalated_user.is_supervisor or escalated_user.is_system_admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent sadece supervisor veya admin'e yükseltebilir"
+        )
+    
+    # Kendi kendine yükseltme kontrolü
+    if escalate_data.escalated_to_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ticket'ı kendinize yükseltemezsiniz"
+        )
+    
+    # Ticket'ı güncelle
+    ticket.escalated_to_id = escalate_data.escalated_to_id
+    ticket.last_updated_by_id = current_user.id
+    ticket.status = TicketStatus.WAITING  # Yükseltilen ticket'lar bekleme durumunda
+    
+    # Yükseltme nedeni için otomatik yorum ekle
+    escalation_comment = TicketComment(
+        ticket_id=ticket_id,
+        user_id=current_user.id,
+        content=f"🔺 Ticket yükseltildi: {escalate_data.escalation_reason}",
+        is_internal=True
+    )
+    
+    db.add(escalation_comment)
+    db.commit()
+    db.refresh(ticket)
+    
+    return ticket
+
+
+@router.put("/tickets/{ticket_id}/resolve", response_model=TicketResponse)
+async def resolve_ticket(
+    ticket_id: int,
+    resolve_data: TicketResolve,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent_or_above)
+):
+    """Ticket'ı çöz - Agent ve üstü"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Sadece atanmış kişi veya üst seviye çözebilir
+    can_resolve = (
+        current_user.is_supervisor or 
+        current_user.is_system_admin or 
+        ticket.assigned_to_id == current_user.id
+    )
+    
+    if not can_resolve:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu ticket'ı çözme yetkiniz yok"
+        )
+    
+    # Ticket'ı çöz
+    ticket.resolution = resolve_data.resolution
+    ticket.status = resolve_data.status
+    ticket.last_updated_by_id = current_user.id
+    
+    # Çözüm için otomatik yorum ekle
+    resolution_comment = TicketComment(
+        ticket_id=ticket_id,
+        user_id=current_user.id,
+        content=f"✅ Ticket çözüldü: {resolve_data.resolution}",
+        is_internal=False  # Müşteri de görebilir
+    )
+    
+    db.add(resolution_comment)
+    db.commit()
+    db.refresh(ticket)
+    
+    return ticket
+
+
+@router.put("/tickets/{ticket_id}/close", response_model=TicketResponse)
+async def close_ticket(
+    ticket_id: int,
+    close_data: TicketClose,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_supervisor_or_admin)
+):
+    """Ticket'ı kapat - Supervisor ve Admin"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Sadece çözülmüş ticket'lar kapatılabilir
+    if ticket.status != TicketStatus.RESOLVED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sadece çözülmüş ticket'lar kapatılabilir"
+        )
+    
+    # Ticket'ı kapat
+    ticket.status = TicketStatus.CLOSED
+    ticket.last_updated_by_id = current_user.id
+    
+    # Kapatma notu varsa yorum ekle
+    if close_data.closing_note:
+        closing_comment = TicketComment(
+            ticket_id=ticket_id,
+            user_id=current_user.id,
+            content=f"🔒 Ticket kapatıldı: {close_data.closing_note}",
+            is_internal=True
+        )
+        db.add(closing_comment)
+    
+    db.commit()
+    db.refresh(ticket)
+    
+    return ticket
+
+
+@router.post("/tickets/{ticket_id}/attachments")
+async def upload_attachments(
+    ticket_id: int,
+    files: List[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Ticket'a dosya ekle"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Erişim kontrolü
+    can_upload = (
+        current_user.is_supervisor or 
+        current_user.is_system_admin or
+        current_user.is_agent or
+        ticket.created_by_id == current_user.id
+    )
+    
+    if not can_upload:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu ticket'a dosya yükleme yetkiniz yok"
+        )
+    
+    # Dosya boyutu kontrolü (5MB max)
+    MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+    for file in files:
+        file.file.seek(0, 2)  # Dosyanın sonuna git
+        file_size = file.file.tell()
+        file.file.seek(0)  # Başa dön
+        
+        if file_size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Dosya boyutu çok büyük: {file.filename}. Max 5MB."
+            )
+    
+    # Uploads klasörünü oluştur
+    upload_dir = "uploads/tickets"
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    uploaded_files = []
+    
+    for file in files:
+        # Güvenli dosya adı oluştur
+        file_extension = os.path.splitext(file.filename)[1]
+        safe_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(upload_dir, safe_filename)
+        
+        # Dosyayı kaydet
+        content = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        uploaded_files.append({
+            "original_name": file.filename,
+            "stored_name": safe_filename,
+            "path": file_path,
+            "size": len(content),
+            "content_type": file.content_type
+        })
+    
+    # Mevcut attachment_urls'i güncelle
+    import json
+    current_attachments = []
+    if ticket.attachment_urls:
+        try:
+            current_attachments = json.loads(ticket.attachment_urls)
+        except:
+            current_attachments = []
+    
+    current_attachments.extend(uploaded_files)
+    ticket.attachment_urls = json.dumps(current_attachments)
+    ticket.last_updated_by_id = current_user.id
+    
+    # Dosya yükleme yorumu ekle
+    file_names = [f["original_name"] for f in uploaded_files]
+    attachment_comment = TicketComment(
+        ticket_id=ticket_id,
+        user_id=current_user.id,
+        content=f"📎 Dosya(lar) eklendi: {', '.join(file_names)}",
+        is_internal=False
+    )
+    
+    db.add(attachment_comment)
+    db.commit()
+    
+    return {
+        "message": "Dosyalar başarıyla yüklendi",
+        "uploaded_files": uploaded_files
+    }
+
+
+@router.get("/tickets/{ticket_id}/attachments")
+async def get_ticket_attachments(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Ticket'ın dosyalarını listele"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    # Erişim kontrolü
+    can_view = (
+        current_user.is_supervisor or 
+        current_user.is_system_admin or
+        current_user.is_agent or
+        ticket.created_by_id == current_user.id or
+        ticket.assigned_to_id == current_user.id
+    )
+    
+    if not can_view:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu ticket'ın dosyalarını görme yetkiniz yok"
+        )
+    
+    attachments = []
+    if ticket.attachment_urls:
+        try:
+            import json
+            attachments = json.loads(ticket.attachment_urls)
+        except:
+            attachments = []
+    
+    return {
+        "ticket_id": ticket_id,
+        "attachments": attachments
+    }
+
+
+@router.put("/tickets/{ticket_id}/reopen", response_model=TicketResponse)
+async def reopen_ticket(
+    ticket_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_agent_or_above)
+):
+    """Kapatılmış ticket'ı yeniden aç"""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    
+    if not ticket:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Ticket bulunamadı"
+        )
+    
+    if ticket.status not in [TicketStatus.CLOSED, TicketStatus.RESOLVED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sadece kapatılmış veya çözülmüş ticket'lar yeniden açılabilir"
+        )
+    
+    # Ticket'ı yeniden aç
+    ticket.status = TicketStatus.IN_PROGRESS
+    ticket.resolution = None  # Çözümü temizle
+    ticket.last_updated_by_id = current_user.id
+    
+    # Yeniden açma yorumu
+    reopen_comment = TicketComment(
+        ticket_id=ticket_id,
+        user_id=current_user.id,
+        content="🔄 Ticket yeniden açıldı",
+        is_internal=True
+    )
+    
+    db.add(reopen_comment)
+    db.commit()
+    db.refresh(ticket)
+    
+    return ticket

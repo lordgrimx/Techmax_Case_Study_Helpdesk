@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { EyeIcon, ClockIcon, CheckCircleIcon, AlertCircleIcon, PlusIcon, MessageCircleIcon } from 'lucide-react';
+import { EyeIcon, ClockIcon, CheckCircleIcon, AlertCircleIcon, PlusIcon, MessageCircleIcon, EditIcon } from 'lucide-react';
 
 const statusColors = {
   'açık': 'bg-red-100 text-red-800',
@@ -28,7 +28,7 @@ const statusIcons = {
   'kapatıldı': CheckCircleIcon,
 };
 
-export default function TicketList({ tickets, isLoading, onCreateTicket, error, currentUser, onAddComment }) {
+export default function TicketList({ tickets, isLoading, onCreateTicket, error, currentUser, onAddComment, onEditTicket }) {
   const router = useRouter();
 
   if (error) {
@@ -101,9 +101,24 @@ export default function TicketList({ tickets, isLoading, onCreateTicket, error, 
           const StatusIcon = statusIcons[ticket.status] || AlertCircleIcon;
           
           return (
-            <div key={ticket.id} className="group bg-white/60 backdrop-blur-sm border border-gray-200 rounded-xl p-6 hover:shadow-xl hover:bg-white/80 transition-all duration-300 transform hover:-translate-y-1">
+            <div key={ticket.id} className="group bg-white/60 backdrop-blur-sm border border-gray-200 rounded-xl p-6 hover:shadow-xl hover:bg-white/80 transition-all duration-300 transform hover:-translate-y-1 relative">
+              {/* Edit Icon - Right Top Corner */}
+              <div className="absolute top-4 right-4">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-8 h-8 p-0 hover:bg-blue-100 hover:text-blue-600 text-gray-500"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditTicket && onEditTicket(ticket);
+                  }}
+                >
+                  <EditIcon className="w-4 h-4" />
+                </Button>
+              </div>
+
               {/* Header */}
-              <div className="flex justify-between items-start mb-4">
+              <div className="flex justify-between items-start mb-4 pr-10">
                 <h3 className="text-lg font-semibold text-gray-900 line-clamp-2 group-hover:text-blue-600 transition-colors duration-200">
                   {ticket.title}
                 </h3>

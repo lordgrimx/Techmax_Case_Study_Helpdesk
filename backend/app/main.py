@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from app.api.v1.routes import auth, users, tickets, test
 
 app = FastAPI(
@@ -23,6 +25,11 @@ app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
 app.include_router(users.router, prefix="/api/v1", tags=["users"])
 app.include_router(tickets.router, prefix="/api/v1", tags=["tickets"])
 app.include_router(test.router, prefix="/api/v1", tags=["test"])
+
+# Static files için uploads klasörünü mount et
+uploads_path = Path("uploads")
+uploads_path.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 @app.get("/")
 async def root():

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -30,13 +30,32 @@ export default function TicketForm({ onSubmit, initialData, isLoading }) {
     formState: { errors },
     reset,
   } = useForm({
-    defaultValues: initialData || {
+    defaultValues: {
       title: '',
       description: '',
       priority: 'orta',
       category: 'diğer',
     },
   });
+
+  // initialData değiştiğinde formu sıfırla
+  useEffect(() => {
+    if (initialData) {
+      reset({
+        title: initialData.title || '',
+        description: initialData.description || '',
+        priority: initialData.priority || 'orta',
+        category: initialData.category || 'diğer',
+      });
+    } else {
+      reset({
+        title: '',
+        description: '',
+        priority: 'orta',
+        category: 'diğer',
+      });
+    }
+  }, [initialData, reset]);
 
   const onFormSubmit = (data) => {
     onSubmit(data);

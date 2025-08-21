@@ -139,7 +139,7 @@ export default function TicketComments({ ticketId }) {
             <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
               <MessageSquareIcon className="w-4 h-4 text-blue-600" />
             </div>
-            <span>Yorumlar</span>
+            <span className='text-gray-700'>Yorumlar</span>
           </CardTitle>
         </CardHeader>
         <CardContent className="pt-6">
@@ -160,7 +160,7 @@ export default function TicketComments({ ticketId }) {
             <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
               <MessageSquareIcon className="w-4 h-4 text-blue-600" />
             </div>
-            <span>Yorumlar</span>
+            <span className='text-gray-700'>Yorumlar</span>
             <Badge variant="secondary" className="bg-gray-100 text-gray-600">
               {visibleComments.length}
             </Badge>
@@ -171,8 +171,8 @@ export default function TicketComments({ ticketId }) {
         {/* Comments List */}
         <div className="space-y-4 max-h-96 overflow-y-auto">
           {visibleComments.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <MessageSquareIcon className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <div className="text-center py-8 text-gray-700">
+              <MessageSquareIcon className="w-12 h-12 mx-auto mb-3 text-gray-500" />
               <p>Henüz yorum yok</p>
               <p className="text-sm">İlk yorumu siz yazın!</p>
             </div>
@@ -193,7 +193,7 @@ export default function TicketComments({ ticketId }) {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{comment.user?.full_name}</p>
-                      <div className="flex items-center space-x-2 text-xs text-gray-500">
+                      <div className="flex items-center space-x-2 text-xs text-gray-700">
                         <ClockIcon className="w-3 h-3" />
                         <span>
                           {new Date(comment.created_at).toLocaleString('tr-TR', {
@@ -264,7 +264,7 @@ export default function TicketComments({ ticketId }) {
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-            <p className="text-sm">Yorumlar yüklenirken hata oluştu: {error.message}</p>
+            <p className="text-sm text-gray-700">Yorumlar yüklenirken hata oluştu: {error.message}</p>
           </div>
         )}
       </CardContent>

@@ -103,13 +103,12 @@ export default function Layout({ children }) {
       ];
     }
 
-    // role_id 4 (Admin) olanlar için tüm yetkiler
+    // role_id 4 (Admin) olanlar için
     if (userRoleId === 4 || userRole === 'admin') {
       return [
         ...baseNav,
         { name: 'Kullanıcılar', href: '/users', icon: UsersIcon },
-        { name: 'Raporlar', href: '/reports', icon: BarChart3Icon },
-        { name: 'Ayarlar', href: '/settings', icon: SettingsIcon },
+        { name: 'Agent Kullanıcıları', href: '/agent-users', icon: UsersIcon },
       ];
     }
 

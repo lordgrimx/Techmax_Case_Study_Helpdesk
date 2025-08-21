@@ -89,12 +89,39 @@ const createTicket = async (ticketData) => {
   return response.json();
 };
 
+const updateTicket = async ({ ticketId, ticketData }) => {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    throw new Error('No token found');
+  }
+
+  const response = await fetch(`http://localhost:8000/api/v1/tickets/${ticketId}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(ticketData),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) {
+      localStorage.removeItem('token');
+      throw new Error('Unauthorized');
+    }
+    throw new Error('Failed to update ticket');
+  }
+
+  return response.json();
+};
+
 export default function TicketsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
   const [selectedTicketId, setSelectedTicketId] = useState(null);
+  const [editingTicket, setEditingTicket] = useState(null);
   const router = useRouter();
   const queryClient = useQueryClient();
 
@@ -125,6 +152,21 @@ export default function TicketsPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
       setIsModalOpen(false);
+      setEditingTicket(null);
+    },
+    onError: (error) => {
+      if (error.message === 'No token found' || error.message === 'Unauthorized') {
+        router.push('/login');
+      }
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: updateTicket,
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      setIsModalOpen(false);
+      setEditingTicket(null);
     },
     onError: (error) => {
       if (error.message === 'No token found' || error.message === 'Unauthorized') {
@@ -140,12 +182,26 @@ export default function TicketsPage() {
   }, [error, router]);
 
   const handleCreateTicket = (data) => {
-    mutation.mutate(data);
+    if (editingTicket) {
+      updateMutation.mutate({ ticketId: editingTicket.id, ticketData: data });
+    } else {
+      mutation.mutate(data);
+    }
   };
 
   const handleAddComment = (ticketId) => {
     setSelectedTicketId(ticketId);
     setIsCommentModalOpen(true);
+  };
+
+  const handleEditTicket = (ticket) => {
+    setEditingTicket(ticket);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingTicket(null);
   };
 
   const handleCloseCommentModal = () => {
@@ -215,41 +271,43 @@ export default function TicketsPage() {
             currentUser={currentUser}
             onCreateTicket={() => setIsModalOpen(true)}
             onAddComment={handleAddComment}
+            onEditTicket={handleEditTicket}
           />
         </div>
       </div>
 
-      {/* Modal for New Ticket */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)}>
+      {/* Modal for New/Edit Ticket */}
+      <Modal isOpen={isModalOpen} onClose={handleCloseModal}>
         <div className="p-8">
           <div className="mb-8 text-center">
             <div className="mx-auto w-16 h-16 bg-gradient-to-r from-green-600 to-blue-600 rounded-2xl flex items-center justify-center mb-4">
               <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={editingTicket ? "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" : "M12 6v6m0 0v6m0-6h6m-6 0H6"} />
               </svg>
             </div>
             <h2 className="text-3xl font-bold text-gray-900 mb-2">
-              Yeni Destek Talebi
+              {editingTicket ? 'Ticket Düzenle' : 'Yeni Destek Talebi'}
             </h2>
             <p className="text-gray-600 text-lg">
-              Yaşadığınız sorunu detaylı bir şekilde açıklayın
+              {editingTicket ? 'Mevcut ticket bilgilerini güncelleyin' : 'Yaşadığınız sorunu detaylı bir şekilde açıklayın'}
             </p>
           </div>
 
-          {mutation.error && (
+          {(mutation.error || updateMutation.error) && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
               <div className="flex items-center">
                 <svg className="w-5 h-5 mr-2" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
                 </svg>
-                Ticket oluşturulurken hata oluştu: {mutation.error.message}
+                Ticket {editingTicket ? 'güncellenirken' : 'oluşturulurken'} hata oluştu: {(mutation.error || updateMutation.error)?.message}
               </div>
             </div>
           )}
 
           <TicketForm 
             onSubmit={handleCreateTicket} 
-            isLoading={mutation.isPending}
+            isLoading={mutation.isPending || updateMutation.isPending}
+            initialData={editingTicket}
           />
         </div>
       </Modal>
