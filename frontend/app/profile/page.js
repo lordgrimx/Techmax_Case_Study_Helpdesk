@@ -29,12 +29,21 @@ import { Modal } from '@/components/ui/modal';
 export default function ProfilePage() {
   const router = useRouter();
   const [user, setUser] = useState(null);
+  const [userStats, setUserStats] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showImageModal, setShowImageModal] = useState(false);
   const [showBackgroundModal, setShowBackgroundModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null);
   const [backgroundGradient, setBackgroundGradient] = useState('from-blue-600 via-purple-600 to-indigo-600');
+  const [passwordData, setPasswordData] = useState({
+    current_password: '',
+    new_password: '',
+    confirm_password: ''
+  });
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
   const [formData, setFormData] = useState({
     full_name: '',
     email: '',
@@ -52,14 +61,15 @@ export default function ProfilePage() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/v1/auth/me', {
+      // User bilgilerini al
+      const userResponse = await fetch('http://localhost:8000/api/v1/auth/me', {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
       });
 
-      if (response.ok) {
-        const userData = await response.json();
+      if (userResponse.ok) {
+        const userData = await userResponse.json();
         setUser(userData);
         setFormData({
           full_name: userData.full_name || '',
@@ -68,6 +78,18 @@ export default function ProfilePage() {
           department: userData.department || '',
           profile_image: userData.profile_image || ''
         });
+
+        // User istatistiklerini al
+        const statsResponse = await fetch('http://localhost:8000/api/v1/auth/me/stats', {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
+
+        if (statsResponse.ok) {
+          const statsData = await statsResponse.json();
+          setUserStats(statsData);
+        }
       } else {
         // Token geçersizse login'e yönlendir
         localStorage.removeItem('token');
@@ -191,6 +213,51 @@ export default function ProfilePage() {
     }
   };
 
+  const handlePasswordChange = async () => {
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    if (passwordData.new_password !== passwordData.confirm_password) {
+      setPasswordError('Yeni şifre ve onay şifresi eşleşmiyor');
+      return;
+    }
+
+    if (passwordData.new_password.length < 6) {
+      setPasswordError('Yeni şifre en az 6 karakter olmalıdır');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:8000/api/v1/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(passwordData),
+      });
+
+      if (response.ok) {
+        setPasswordSuccess('Şifre başarıyla değiştirildi');
+        setPasswordData({
+          current_password: '',
+          new_password: '',
+          confirm_password: ''
+        });
+        setTimeout(() => {
+          setShowPasswordModal(false);
+          setPasswordSuccess('');
+        }, 2000);
+      } else {
+        const errorData = await response.json();
+        setPasswordError(errorData.detail || 'Şifre değiştirme işlemi başarısız');
+      }
+    } catch (error) {
+      setPasswordError('Bir hata oluştu. Lütfen tekrar deneyin.');
+    }
+  };
+
   if (loading) {
     return (
       <Layout>
@@ -259,7 +326,11 @@ export default function ProfilePage() {
               <div className="w-32 h-32 rounded-2xl bg-white shadow-xl border-4 border-white overflow-hidden">
                 {user.profile_image || formData.profile_image ? (
                   <Image 
-                    src={formData.profile_image || user.profile_image} 
+                    src={
+                      (formData.profile_image || user.profile_image).startsWith('http') 
+                        ? (formData.profile_image || user.profile_image)
+                        : `http://localhost:8000${formData.profile_image || user.profile_image}`
+                    } 
                     alt="Profile" 
                     width={128}
                     height={128}
@@ -438,19 +509,27 @@ export default function ProfilePage() {
               <CardContent>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="text-center p-4 bg-blue-50 rounded-xl">
-                    <div className="text-2xl font-bold text-blue-600">0</div>
+                    <div className="text-2xl font-bold text-blue-600">
+                      {userStats?.active_tickets || 0}
+                    </div>
                     <div className="text-sm text-gray-600">Aktif Ticket</div>
                   </div>
                   <div className="text-center p-4 bg-green-50 rounded-xl">
-                    <div className="text-2xl font-bold text-green-600">0</div>
+                    <div className="text-2xl font-bold text-green-600">
+                      {userStats?.resolved_tickets || 0}
+                    </div>
                     <div className="text-sm text-gray-600">Çözülen Ticket</div>
                   </div>
                   <div className="text-center p-4 bg-purple-50 rounded-xl">
-                    <div className="text-2xl font-bold text-purple-600">0</div>
+                    <div className="text-2xl font-bold text-purple-600">
+                      {userStats?.avg_resolution_days || 0} gün
+                    </div>
                     <div className="text-sm text-gray-600">Ortalama Süre</div>
                   </div>
                   <div className="text-center p-4 bg-orange-50 rounded-xl">
-                    <div className="text-2xl font-bold text-orange-600">100%</div>
+                    <div className="text-2xl font-bold text-orange-600">
+                      {userStats?.satisfaction_rate || 100}%
+                    </div>
                     <div className="text-sm text-gray-600">Memnuniyet</div>
                   </div>
                 </div>
@@ -496,6 +575,13 @@ export default function ProfilePage() {
                       {user.created_at ? new Date(user.created_at).toLocaleDateString('tr-TR') : 'Bilinmiyor'}
                     </span>
                   </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-gray-600">Toplam Ticket</span>
+                    <span className="text-sm text-gray-900 font-semibold">
+                      {userStats?.total_tickets || 0}
+                    </span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -516,6 +602,7 @@ export default function ProfilePage() {
                 <Button 
                   variant="outline" 
                   className="w-full justify-start bg-white/50 border-blue-300 text-blue-700 hover:bg-blue-100 h-12"
+                  onClick={() => setShowPasswordModal(true)}
                 >
                   <KeyIcon className="w-4 h-4 mr-3" />
                   Şifre Değiştir
@@ -524,6 +611,10 @@ export default function ProfilePage() {
                 <Button 
                   variant="outline" 
                   className="w-full justify-start bg-white/50 border-blue-300 text-blue-700 hover:bg-blue-100 h-12"
+                  onClick={() => {
+                    // Oturum geçmişi modal'ını aç
+                    alert('Oturum geçmişi özelliği yakında eklenecek!');
+                  }}
                 >
                   <HistoryIcon className="w-4 h-4 mr-3" />
                   Oturum Geçmişi
@@ -612,6 +703,118 @@ export default function ProfilePage() {
                 } hover:scale-105 transition-transform`}
               />
             ))}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Password Change Modal */}
+      <Modal isOpen={showPasswordModal} onClose={() => {
+        setShowPasswordModal(false);
+        setPasswordError('');
+        setPasswordSuccess('');
+        setPasswordData({
+          current_password: '',
+          new_password: '',
+          confirm_password: ''
+        });
+      }} title="Şifre Değiştir">
+        <div className="space-y-6">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <KeyIcon className="w-8 h-8 text-white" />
+            </div>
+            <p className="text-gray-600">Güvenliğiniz için mevcut şifrenizi girmeniz gerekiyor</p>
+          </div>
+
+          {passwordError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+              {passwordError}
+            </div>
+          )}
+
+          {passwordSuccess && (
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
+              {passwordSuccess}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="current_password" className="text-sm font-medium text-gray-700">
+                Mevcut Şifre
+              </Label>
+              <Input
+                id="current_password"
+                type="password"
+                value={passwordData.current_password}
+                onChange={(e) => setPasswordData(prev => ({
+                  ...prev,
+                  current_password: e.target.value
+                }))}
+                className="mt-1"
+                placeholder="Mevcut şifrenizi girin"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="new_password" className="text-sm font-medium text-gray-700">
+                Yeni Şifre
+              </Label>
+              <Input
+                id="new_password"
+                type="password"
+                value={passwordData.new_password}
+                onChange={(e) => setPasswordData(prev => ({
+                  ...prev,
+                  new_password: e.target.value
+                }))}
+                className="mt-1"
+                placeholder="Yeni şifrenizi girin (en az 6 karakter)"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="confirm_password" className="text-sm font-medium text-gray-700">
+                Yeni Şifre Onay
+              </Label>
+              <Input
+                id="confirm_password"
+                type="password"
+                value={passwordData.confirm_password}
+                onChange={(e) => setPasswordData(prev => ({
+                  ...prev,
+                  confirm_password: e.target.value
+                }))}
+                className="mt-1"
+                placeholder="Yeni şifrenizi tekrar girin"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPasswordModal(false);
+                setPasswordError('');
+                setPasswordSuccess('');
+                setPasswordData({
+                  current_password: '',
+                  new_password: '',
+                  confirm_password: ''
+                });
+              }}
+              className="flex-1"
+            >
+              İptal
+            </Button>
+            <Button
+              onClick={handlePasswordChange}
+              disabled={!passwordData.current_password || !passwordData.new_password || !passwordData.confirm_password}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Şifreyi Değiştir
+            </Button>
           </div>
         </div>
       </Modal>

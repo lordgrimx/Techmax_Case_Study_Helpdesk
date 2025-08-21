@@ -1,7 +1,8 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
+from sqlalchemy import func, and_
 from app.core.config import settings
 from app.core.security import (
     verify_password, 
@@ -15,7 +16,8 @@ from app.core.security import (
 from app.db.session import get_db
 from app.models.user import User, UserRole, UserStatus
 from app.models.role import Role, RoleType
-from pydantic import BaseModel, EmailStr
+from app.models.ticket import Ticket, TicketStatus
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 
 router = APIRouter()
@@ -32,12 +34,25 @@ class UserResponse(BaseModel):
     username: str
     email: str
     full_name: str
+    phone: Optional[str] = None
     role: Optional[str] = None
     role_name: Optional[str] = None
     permissions: list = []
     department: Optional[str] = None
     is_active: bool
     status: Optional[str] = None
+    profile_image: Optional[str] = None
+    created_at: Optional[str] = None
+
+    @field_validator('created_at', mode='before')
+    @classmethod
+    def convert_datetime_to_string(cls, v):
+        if isinstance(v, datetime):
+            return v.isoformat()
+        return v
+
+    class Config:
+        from_attributes = True
 
 class UserCreate(BaseModel):
     username: str
@@ -47,6 +62,18 @@ class UserCreate(BaseModel):
     phone: Optional[str] = None
     department: Optional[str] = None
     role_name: Optional[str] = "customer"  # Varsayılan rol
+
+class UserStats(BaseModel):
+    active_tickets: int
+    resolved_tickets: int
+    total_tickets: int
+    avg_resolution_days: float
+    satisfaction_rate: float
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirm_password: str
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     """Mevcut kullanıcıyı token'dan al"""
@@ -165,6 +192,95 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 async def read_users_me(current_user: User = Depends(get_current_active_user)):
     """Mevcut kullanıcı bilgilerini getir"""
     return current_user
+
+@router.get("/auth/me/stats", response_model=UserStats)
+async def get_user_stats(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Kullanıcının ticket istatistiklerini getir"""
+    
+    # Aktif ticket sayısı
+    active_tickets = db.query(Ticket).filter(
+        and_(
+            Ticket.created_by_id == current_user.id,
+            Ticket.status.in_([TicketStatus.OPEN, TicketStatus.IN_PROGRESS, TicketStatus.WAITING])
+        )
+    ).count()
+    
+    # Çözülen ticket sayısı
+    resolved_tickets = db.query(Ticket).filter(
+        and_(
+            Ticket.created_by_id == current_user.id,
+            Ticket.status.in_([TicketStatus.RESOLVED, TicketStatus.CLOSED])
+        )
+    ).count()
+    
+    # Toplam ticket sayısı
+    total_tickets = db.query(Ticket).filter(
+        Ticket.created_by_id == current_user.id
+    ).count()
+    
+    # Ortalama çözüm süresi (çözülen ticketlar için)
+    resolved_ticket_durations = db.query(
+        func.avg(
+            func.extract('epoch', Ticket.updated_at - Ticket.created_at) / 86400
+        )
+    ).filter(
+        and_(
+            Ticket.created_by_id == current_user.id,
+            Ticket.status.in_([TicketStatus.RESOLVED, TicketStatus.CLOSED]),
+            Ticket.updated_at.isnot(None)
+        )
+    ).scalar()
+    
+    avg_resolution_days = float(resolved_ticket_durations or 0)
+    
+    # Memnuniyet oranı (basit hesaplama - çözülen / toplam)
+    satisfaction_rate = (resolved_tickets / total_tickets * 100) if total_tickets > 0 else 100.0
+    
+    return UserStats(
+        active_tickets=active_tickets,
+        resolved_tickets=resolved_tickets,
+        total_tickets=total_tickets,
+        avg_resolution_days=round(avg_resolution_days, 1),
+        satisfaction_rate=round(satisfaction_rate, 1)
+    )
+
+@router.post("/auth/change-password")
+async def change_password(
+    password_data: ChangePasswordRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Kullanıcı şifresi değiştirme"""
+    
+    # Yeni şifre ve onay kontrolü
+    if password_data.new_password != password_data.confirm_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Yeni şifre ve onay şifresi eşleşmiyor"
+        )
+    
+    # Mevcut şifre kontrolü
+    if not verify_password(password_data.current_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Mevcut şifre hatalı"
+        )
+    
+    # Yeni şifre uzunluk kontrolü
+    if len(password_data.new_password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Yeni şifre en az 6 karakter olmalıdır"
+        )
+    
+    # Şifreyi güncelle
+    current_user.hashed_password = get_password_hash(password_data.new_password)
+    db.commit()
+    
+    return {"message": "Şifre başarıyla değiştirildi"}
 
 @router.post("/auth/logout")
 async def logout(current_user: User = Depends(get_current_active_user)):
