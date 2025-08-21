@@ -115,13 +115,30 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Bu e-posta adresi zaten kullanılıyor"
         )
     
-    # Varsayılan rolü al (customer)
-    default_role = db.query(Role).filter(Role.name == RoleType.CUSTOMER).first()
-    if not default_role:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Varsayılan rol bulunamadı. Lütfen sistem yöneticisine başvurun."
-        )
+    # İlk kullanıcı kontrolü - eğer hiç kullanıcı yoksa ADMIN rol ata
+    user_count = db.query(User).count()
+    is_first_user = user_count == 0
+    
+    if is_first_user:
+        # İlk kullanıcı - ADMIN rolü al
+        assigned_role = db.query(Role).filter(Role.name == RoleType.ADMIN).first()
+        if not assigned_role:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Admin rolü bulunamadı. Lütfen sistem yöneticisine başvurun."
+            )
+        role_enum = UserRole.ADMIN
+        is_admin = True
+    else:
+        # Sonraki kullanıcılar - CUSTOMER rolü al
+        assigned_role = db.query(Role).filter(Role.name == RoleType.CUSTOMER).first()
+        if not assigned_role:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Customer rolü bulunamadı. Lütfen sistem yöneticisine başvurun."
+            )
+        role_enum = UserRole.USER
+        is_admin = False
     
     # Yeni kullanıcı oluştur
     hashed_password = get_password_hash(user_data.password)
@@ -133,11 +150,11 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         hashed_password=hashed_password,
         phone=user_data.phone,
         department=user_data.department,
-        role_id=default_role.id,  # Yeni rol sistemi için role_id set et
-        role=UserRole.USER,  # Geriye uyumluluk için eski rol alanı
+        role_id=assigned_role.id,  # Yeni rol sistemi için role_id set et
+        role=role_enum,  # Geriye uyumluluk için eski rol alanı
         status=UserStatus.ACTIVE,  # Varsayılan durum
         is_active=True,
-        is_admin=False
+        is_admin=is_admin
     )
     
     db.add(new_user)
